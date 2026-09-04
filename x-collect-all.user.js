@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         X - Collect Bookmarks, Likes, Following & Followers
 // @namespace    https://ualan.dev/tampermonkey
-// @version      1.4.0
+// @version      1.4.1
 // @description  Passively captures bookmarks, likes, following and followers (engagement stats, profile fields, and a raw GraphQL dump per item) as you scroll the matching X pages. One local store, one panel, export/import, and manual sync to a cf-x-archive Worker.
 // @author       ualan
 // @match        https://x.com/*
@@ -333,28 +333,24 @@
   // Tokens), sent as CF-Access-Client-Id / CF-Access-Client-Secret headers —
   // the Access policy must separately allow that service token in.
 
-  const ENDPOINT_KEY = 'xArchiveEndpoint';
+  // Fixed, not prompted — a mistyped/pasted-wrong endpoint was the recurring
+  // cause of "sync fails" reports, so there's nothing left to get wrong here.
+  const CLOUD_ENDPOINT = 'https://cf-x-archive.pixelbucket.org';
   const CLIENT_ID_KEY = 'xArchiveCfAccessId';
   const CLIENT_SECRET_KEY = 'xArchiveCfAccessSecret';
 
   async function getCloudSettings() {
-    let endpoint = await GM_getValue(ENDPOINT_KEY, '');
     let clientId = await GM_getValue(CLIENT_ID_KEY, '');
     let clientSecret = await GM_getValue(CLIENT_SECRET_KEY, '');
-    if (!endpoint) {
-      endpoint = prompt('cf-x-archive Worker URL', 'https://cf-x-archive.pixelbucket.org') || '';
-      endpoint = endpoint.replace(/\/+$/, '');
-      if (endpoint) await GM_setValue(ENDPOINT_KEY, endpoint);
-    }
     if (!clientId) {
-      clientId = prompt('CF Access Service Token — Client ID') || '';
+      clientId = (prompt('CF Access Service Token — Client ID') || '').trim();
       if (clientId) await GM_setValue(CLIENT_ID_KEY, clientId);
     }
     if (!clientSecret) {
-      clientSecret = prompt('CF Access Service Token — Client Secret') || '';
+      clientSecret = (prompt('CF Access Service Token — Client Secret') || '').trim();
       if (clientSecret) await GM_setValue(CLIENT_SECRET_KEY, clientSecret);
     }
-    return { endpoint, clientId, clientSecret };
+    return { endpoint: CLOUD_ENDPOINT, clientId, clientSecret };
   }
 
   function gmPost(url, clientId, clientSecret, body) {
@@ -397,10 +393,10 @@
   }
 
   function resetCloudSettings() {
-    GM_setValue(ENDPOINT_KEY, '');
+    GM_setValue('xArchiveEndpoint', ''); // stale key from before the endpoint was hardcoded
     GM_setValue(CLIENT_ID_KEY, '');
     GM_setValue(CLIENT_SECRET_KEY, '');
-    alert('Cloud endpoint/service token cleared. Next sync will ask again.');
+    alert('Service token cleared. Next sync will ask again.');
   }
 
   // ---- floating panel ----
