@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         X - Collect Bookmarks, Likes, Following & Followers
 // @namespace    https://ualan.dev/tampermonkey
-// @version      1.1.0
-// @description  Passively captures bookmarks, likes, following and followers as you scroll the matching X pages. One local store, one panel, export/import, and manual sync to a cf-x-archive Worker.
+// @version      1.3.0
+// @description  Passively captures bookmarks, likes, following and followers (engagement stats, profile fields, and a raw GraphQL dump per item) as you scroll the matching X pages. One local store, one panel, export/import, and manual sync to a cf-x-archive Worker.
 // @author       ualan
 // @match        https://x.com/*
 // @match        https://twitter.com/*
@@ -146,6 +146,19 @@
         createdAt: legacy?.created_at ?? null,
         text: tweet?.note_tweet?.note_tweet_results?.result?.text ?? legacy?.full_text ?? '',
         media: extractMedia(tweet),
+        likeCount: legacy?.favorite_count ?? null,
+        retweetCount: legacy?.retweet_count ?? null,
+        replyCount: legacy?.reply_count ?? null,
+        bookmarkCount: legacy?.bookmark_count ?? null,
+        viewsCount: tweet?.views?.count != null ? Number(tweet.views.count) : null,
+        lang: legacy?.lang ?? null,
+        source: (tweet?.source ?? '').replace(/<[^>]+>/g, '') || null,
+        possiblySensitive: !!legacy?.possibly_sensitive,
+        quotedStatusId: tweet?.quoted_status_result?.result ? unwrapTweet(tweet.quoted_status_result.result)?.rest_id ?? null : null,
+        isRetweet: !!legacy?.retweeted_status_result,
+        // Full raw tweet object (legacy/core/views/quoted etc.) — a safety
+        // net for fields we don't parse into their own column.
+        raw: JSON.stringify(tweet),
         capturedAt: Date.now(),
       });
     }
@@ -193,6 +206,20 @@
         followersCount: legacy.followers_count ?? null,
         followingCount: legacy.friends_count ?? null,
         verified: !!(result?.is_blue_verified || legacy.verified),
+        location: legacy.location ?? result?.location?.location ?? null,
+        profileImageUrl: (legacy.profile_image_url_https ?? '').replace('_normal', '_400x400') || null,
+        bannerImageUrl: legacy.profile_banner_url ?? null,
+        tweetsCount: legacy.statuses_count ?? null,
+        listedCount: legacy.listed_count ?? null,
+        favouritesCount: legacy.favourites_count ?? null,
+        joinedAt: core.created_at ?? legacy.created_at ?? null,
+        verifiedType: result?.verified_type ?? null,
+        professionalCategory: result?.professional?.category?.[0]?.name ?? null,
+        protected: !!legacy.protected,
+        pinnedTweetId: legacy.pinned_tweet_ids_str?.[0] ?? null,
+        // Full raw user object, in case a future feature needs a field not
+        // pulled out above — X's GraphQL response has far more than we parse.
+        raw: JSON.stringify(result),
         capturedAt: Date.now(),
       });
     }
@@ -263,7 +290,9 @@
     const store = (await GM_getValue(STORE_KEY, {})) || {};
     const rows = Object.values(store);
     const cols = ['kind', 'account', 'listOwner', 'screenName', 'name', 'text', 'description', 'url',
-      'createdAt', 'followersCount', 'followingCount', 'verified', 'capturedAt'];
+      'createdAt', 'likeCount', 'retweetCount', 'replyCount', 'bookmarkCount', 'viewsCount', 'lang',
+      'followersCount', 'followingCount', 'verified', 'verifiedType', 'location', 'tweetsCount',
+      'listedCount', 'joinedAt', 'protected', 'capturedAt'];
     const lines = [cols.join(',')];
     for (const r of rows) lines.push(cols.map((c) => csvEscape(r[c])).join(','));
     downloadBlob(`x-data-${Date.now()}.csv`, 'text/csv', lines.join('\n'));
