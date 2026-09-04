@@ -15,6 +15,8 @@
 // @connect      pixelbucket.org
 // @connect      workers.dev
 // @run-at       document-start
+// @downloadURL  https://raw.githubusercontent.com/suspect453/Tampermonkey/main/x-collect-all.user.js
+// @updateURL    https://raw.githubusercontent.com/suspect453/Tampermonkey/main/x-collect-all.user.js
 // ==/UserScript==
 
 // Reference: ~/dev/x-bookmarks-ext (capture/parse/store pattern) and this
