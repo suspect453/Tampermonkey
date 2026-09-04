@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         X - Collect Bookmarks, Likes, Following & Followers
 // @namespace    https://ualan.dev/tampermonkey
-// @version      1.0.0
-// @description  Passively captures bookmarks, likes, following and followers as you scroll the matching X pages. One local store, one panel, one export/import.
+// @version      1.1.0
+// @description  Passively captures bookmarks, likes, following and followers as you scroll the matching X pages. One local store, one panel, export/import, and manual sync to a cf-x-archive Worker.
 // @author       ualan
 // @match        https://x.com/*
 // @match        https://twitter.com/*
@@ -11,6 +11,8 @@
 // @grant        GM_getValue
 // @grant        GM_addStyle
 // @grant        GM_registerMenuCommand
+// @grant        GM_xmlhttpRequest
+// @connect      workers.dev
 // @run-at       document-start
 // ==/UserScript==
 
@@ -294,6 +296,67 @@
     refreshPanel();
   }
 
+  // ---- sync to cf-x-archive (manual, on demand) ----
+
+  const ENDPOINT_KEY = 'xArchiveEndpoint';
+  const TOKEN_KEY = 'xArchiveToken';
+
+  async function getCloudSettings() {
+    let endpoint = await GM_getValue(ENDPOINT_KEY, '');
+    let token = await GM_getValue(TOKEN_KEY, '');
+    if (!endpoint) {
+      endpoint = prompt('cf-x-archive Worker URL (e.g. https://cf-x-archive.<subdomain>.workers.dev)') || '';
+      endpoint = endpoint.replace(/\/+$/, '');
+      if (endpoint) await GM_setValue(ENDPOINT_KEY, endpoint);
+    }
+    if (!token) {
+      token = prompt('cf-x-archive API token') || '';
+      if (token) await GM_setValue(TOKEN_KEY, token);
+    }
+    return { endpoint, token };
+  }
+
+  function gmPost(url, token, body) {
+    return new Promise((resolve, reject) => {
+      GM_xmlhttpRequest({
+        method: 'POST',
+        url,
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        data: JSON.stringify(body),
+        onload: (res) => (res.status >= 200 && res.status < 300 ? resolve(res) : reject(new Error(`HTTP ${res.status}: ${res.responseText}`))),
+        onerror: () => reject(new Error('network error')),
+      });
+    });
+  }
+
+  async function syncToCloud() {
+    const { endpoint, token } = await getCloudSettings();
+    if (!endpoint || !token) return;
+    const store = (await GM_getValue(STORE_KEY, {})) || {};
+    const items = Object.values(store);
+    if (items.length === 0) {
+      flashStatus('Nothing to sync');
+      return;
+    }
+    const BATCH = 200;
+    try {
+      for (let i = 0; i < items.length; i += BATCH) {
+        await gmPost(`${endpoint}/api/sync`, token, { items: items.slice(i, i + BATCH) });
+        flashStatus(`Synced ${Math.min(i + BATCH, items.length)}/${items.length}`);
+      }
+      flashStatus(`Synced ${items.length} item(s) to cloud`);
+    } catch (e) {
+      flashStatus(`Sync failed: ${e.message}`);
+      console.warn('[x-collect] sync failed', e);
+    }
+  }
+
+  function resetCloudSettings() {
+    GM_setValue(ENDPOINT_KEY, '');
+    GM_setValue(TOKEN_KEY, '');
+    alert('Cloud endpoint/token cleared. Next sync will ask again.');
+  }
+
   // ---- floating panel ----
 
   GM_addStyle(`
@@ -365,6 +428,7 @@
           Followers → <code>x.com/&lt;you&gt;/followers</code>
         </div>
         <div id="xc-status"></div>
+        <button id="xc-sync">Sync to cloud</button>
         <button id="xc-json">Export JSON</button>
         <button id="xc-csv">Export CSV</button>
         <button id="xc-import">Import</button>
@@ -376,6 +440,7 @@
       panelEl.classList.toggle('collapsed');
       panelEl.querySelector('#xc-toggle').textContent = panelEl.classList.contains('collapsed') ? '▸' : '▾';
     });
+    panelEl.querySelector('#xc-sync').addEventListener('click', (e) => { e.stopPropagation(); syncToCloud(); });
     panelEl.querySelector('#xc-json').addEventListener('click', (e) => { e.stopPropagation(); exportJSON(); });
     panelEl.querySelector('#xc-csv').addEventListener('click', (e) => { e.stopPropagation(); exportCSV(); });
     panelEl.querySelector('#xc-import').addEventListener('click', (e) => { e.stopPropagation(); importJSON(); });
@@ -383,9 +448,11 @@
     refreshPanel();
   }
 
+  GM_registerMenuCommand('Sync X data to cloud', syncToCloud);
   GM_registerMenuCommand('Export X data (JSON)', exportJSON);
   GM_registerMenuCommand('Export X data (CSV)', exportCSV);
   GM_registerMenuCommand('Import X data (JSON)', importJSON);
+  GM_registerMenuCommand('Reset cloud endpoint/token', resetCloudSettings);
   GM_registerMenuCommand('Clear all X data', clearAll);
 
   if (document.readyState === 'loading') {
