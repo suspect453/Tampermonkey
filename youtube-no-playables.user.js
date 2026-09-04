@@ -7,6 +7,8 @@
 // @match        https://www.youtube.com/*
 // @grant        none
 // @run-at       document-start
+// @downloadURL  https://raw.githubusercontent.com/suspect453/Tampermonkey/main/youtube-no-playables.user.js
+// @updateURL    https://raw.githubusercontent.com/suspect453/Tampermonkey/main/youtube-no-playables.user.js
 // ==/UserScript==
 
 (function () {
