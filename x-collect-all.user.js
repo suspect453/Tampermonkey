@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         X - Collect Bookmarks, Likes, Following & Followers
 // @namespace    https://ualan.dev/tampermonkey
-// @version      1.3.0
+// @version      1.4.0
 // @description  Passively captures bookmarks, likes, following and followers (engagement stats, profile fields, and a raw GraphQL dump per item) as you scroll the matching X pages. One local store, one panel, export/import, and manual sync to a cf-x-archive Worker.
 // @author       ualan
 // @match        https://x.com/*
@@ -12,6 +12,7 @@
 // @grant        GM_addStyle
 // @grant        GM_registerMenuCommand
 // @grant        GM_xmlhttpRequest
+// @connect      pixelbucket.org
 // @connect      workers.dev
 // @run-at       document-start
 // ==/UserScript==
@@ -326,31 +327,46 @@
   }
 
   // ---- sync to cf-x-archive (manual, on demand) ----
+  // cf-x-archive sits behind Cloudflare Access on the whole app (incl.
+  // /api/*), so plain bearer auth no longer gets past the edge. Auth here is
+  // a CF Access Service Token (Zero Trust > Access > Service Auth > Service
+  // Tokens), sent as CF-Access-Client-Id / CF-Access-Client-Secret headers —
+  // the Access policy must separately allow that service token in.
 
   const ENDPOINT_KEY = 'xArchiveEndpoint';
-  const TOKEN_KEY = 'xArchiveToken';
+  const CLIENT_ID_KEY = 'xArchiveCfAccessId';
+  const CLIENT_SECRET_KEY = 'xArchiveCfAccessSecret';
 
   async function getCloudSettings() {
     let endpoint = await GM_getValue(ENDPOINT_KEY, '');
-    let token = await GM_getValue(TOKEN_KEY, '');
+    let clientId = await GM_getValue(CLIENT_ID_KEY, '');
+    let clientSecret = await GM_getValue(CLIENT_SECRET_KEY, '');
     if (!endpoint) {
-      endpoint = prompt('cf-x-archive Worker URL (e.g. https://cf-x-archive.<subdomain>.workers.dev)') || '';
+      endpoint = prompt('cf-x-archive Worker URL', 'https://cf-x-archive.pixelbucket.org') || '';
       endpoint = endpoint.replace(/\/+$/, '');
       if (endpoint) await GM_setValue(ENDPOINT_KEY, endpoint);
     }
-    if (!token) {
-      token = prompt('cf-x-archive API token') || '';
-      if (token) await GM_setValue(TOKEN_KEY, token);
+    if (!clientId) {
+      clientId = prompt('CF Access Service Token — Client ID') || '';
+      if (clientId) await GM_setValue(CLIENT_ID_KEY, clientId);
     }
-    return { endpoint, token };
+    if (!clientSecret) {
+      clientSecret = prompt('CF Access Service Token — Client Secret') || '';
+      if (clientSecret) await GM_setValue(CLIENT_SECRET_KEY, clientSecret);
+    }
+    return { endpoint, clientId, clientSecret };
   }
 
-  function gmPost(url, token, body) {
+  function gmPost(url, clientId, clientSecret, body) {
     return new Promise((resolve, reject) => {
       GM_xmlhttpRequest({
         method: 'POST',
         url,
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        headers: {
+          'Content-Type': 'application/json',
+          'CF-Access-Client-Id': clientId,
+          'CF-Access-Client-Secret': clientSecret,
+        },
         data: JSON.stringify(body),
         onload: (res) => (res.status >= 200 && res.status < 300 ? resolve(res) : reject(new Error(`HTTP ${res.status}: ${res.responseText}`))),
         onerror: () => reject(new Error('network error')),
@@ -359,8 +375,8 @@
   }
 
   async function syncToCloud() {
-    const { endpoint, token } = await getCloudSettings();
-    if (!endpoint || !token) return;
+    const { endpoint, clientId, clientSecret } = await getCloudSettings();
+    if (!endpoint || !clientId || !clientSecret) return;
     const store = (await GM_getValue(STORE_KEY, {})) || {};
     const items = Object.values(store);
     if (items.length === 0) {
@@ -370,7 +386,7 @@
     const BATCH = 200;
     try {
       for (let i = 0; i < items.length; i += BATCH) {
-        await gmPost(`${endpoint}/api/sync`, token, { items: items.slice(i, i + BATCH) });
+        await gmPost(`${endpoint}/api/sync`, clientId, clientSecret, { items: items.slice(i, i + BATCH) });
         flashStatus(`Synced ${Math.min(i + BATCH, items.length)}/${items.length}`);
       }
       flashStatus(`Synced ${items.length} item(s) to cloud`);
@@ -382,8 +398,9 @@
 
   function resetCloudSettings() {
     GM_setValue(ENDPOINT_KEY, '');
-    GM_setValue(TOKEN_KEY, '');
-    alert('Cloud endpoint/token cleared. Next sync will ask again.');
+    GM_setValue(CLIENT_ID_KEY, '');
+    GM_setValue(CLIENT_SECRET_KEY, '');
+    alert('Cloud endpoint/service token cleared. Next sync will ask again.');
   }
 
   // ---- floating panel ----
