@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         X - Collect Bookmarks, Likes, Following & Followers
 // @namespace    https://ualan.dev/tampermonkey
-// @version      1.6.1
-// @description  Passively captures bookmarks, likes, following and followers (engagement stats, profile fields, and a raw GraphQL dump per item) as you scroll the matching X pages. One local store, one panel, export/import, manual sync to a cf-x-archive Worker, and an option to hide the sidebar "Subscribe to Premium" promo.
+// @version      1.7.0
+// @description  Passively captures bookmarks, likes, following and followers (engagement stats, profile fields, and a raw GraphQL dump per item) as you scroll the matching X pages. One local store, one panel, export/import, manual sync to a cf-x-archive Worker, an option to hide the sidebar "Subscribe to Premium" promo, and per-item toggles to hide left primary-nav entries (Explore, Notifications, Chat, Grok, History, Creator Studio, Premium, Profile, More).
 // @author       ualan
 // @match        https://x.com/*
 // @match        https://twitter.com/*
@@ -449,14 +449,45 @@
     if (found) applyPremiumAdVisibility();
   }
 
+  // ---- hide left primary-nav items (Explore, Notifications, etc.) ----
+  // No stable testids for these either; match each nav entry by its label
+  // text and tag it with a data attribute, then hide by CSS class per item
+  // so re-renders don't need re-hiding.
+
+  const HIDE_NAV_KEY = 'xHideNavItems';
+  const NAV_ITEMS = ['Explore', 'Notifications', 'Chat', 'Grok', 'History', 'Creator Studio', 'Premium', 'Profile', 'More'];
+  let hiddenNavItems = {}; // {label: bool}
+
+  const navSlug = (label) => label.toLowerCase().replace(/\s+/g, '-');
+
+  function scanNavItems() {
+    const nav = document.querySelector('nav[aria-label="Primary"]') || document.querySelector('header nav[role="navigation"]');
+    if (!nav) return;
+    const els = nav.querySelectorAll('a[href], [role="link"], [role="button"]');
+    els.forEach((el) => {
+      // innerText may carry a badge count on its own line (e.g. "3\nNotifications"), so match any line
+      const lines = (el.innerText || '').split('\n').map((l) => l.trim().toLowerCase()).filter(Boolean);
+      const aria = (el.getAttribute('aria-label') || '').trim().toLowerCase();
+      const match = NAV_ITEMS.find((n) => lines.includes(n.toLowerCase()) || aria === n.toLowerCase());
+      if (match) el.dataset.xcNav = navSlug(match);
+    });
+  }
+
+  function applyNavVisibility() {
+    NAV_ITEMS.forEach((label) => {
+      document.documentElement.classList.toggle(`xc-hide-${navSlug(label)}`, !!hiddenNavItems[label]);
+    });
+  }
+
   let premiumScanTimer = null;
   function startPremiumAdWatcher() {
     if (!document.body) { setTimeout(startPremiumAdWatcher, 100); return; }
     new MutationObserver(() => {
       clearTimeout(premiumScanTimer);
-      premiumScanTimer = setTimeout(scanForPremiumAd, 300);
+      premiumScanTimer = setTimeout(() => { scanForPremiumAd(); scanNavItems(); }, 300);
     }).observe(document.body, { childList: true, subtree: true });
     scanForPremiumAd();
+    scanNavItems();
   }
 
   (async () => {
@@ -465,6 +496,16 @@
       if (panelEl) panelEl.querySelector('#xc-hide-premium-cb').checked = hidePremiumAd;
       applyPremiumAdVisibility();
     } catch (e) { console.warn('[x-collect] premium-ad setting load failed', e); }
+    try {
+      hiddenNavItems = (await GM_getValue(HIDE_NAV_KEY, {})) || {};
+      if (panelEl) {
+        NAV_ITEMS.forEach((label) => {
+          const cb = panelEl.querySelector(`#xc-nav-${navSlug(label)}`);
+          if (cb) cb.checked = !!hiddenNavItems[label];
+        });
+      }
+      applyNavVisibility();
+    } catch (e) { console.warn('[x-collect] nav-hide setting load failed', e); }
   })();
   startPremiumAdWatcher();
 
@@ -492,6 +533,7 @@
     #xc-panel button.danger { background: #f4212e; }
     #xc-panel button.danger:hover { background: #d61b27; }
     #xc-panel.collapsed #xc-body { display: none; }
+    ${NAV_ITEMS.map((label) => `html.xc-hide-${navSlug(label)} [data-xc-nav="${navSlug(label)}"] { display:none !important; }`).join('\n    ')}
   `);
 
   let panelEl = null;
@@ -543,6 +585,14 @@
           <input type="checkbox" id="xc-hide-premium-cb" checked>
           Hide "Subscribe to Premium" promo
         </label>
+        <details id="xc-nav-hide" style="margin-bottom:6px;">
+          <summary style="cursor:pointer;">Hide nav items</summary>
+          ${NAV_ITEMS.map((label) => `
+          <label id="xc-nav-label-${navSlug(label)}" style="display:flex;align-items:center;gap:6px;margin-top:6px;cursor:pointer;">
+            <input type="checkbox" id="xc-nav-${navSlug(label)}">
+            ${label}
+          </label>`).join('')}
+        </details>
         <button id="xc-xcancel">Open on xcancel</button>
         <button id="xc-nitter">Open on nitter</button>
         <button id="xc-sync">Sync to cloud</button>
@@ -570,6 +620,17 @@
       hidePremiumAd = e.target.checked;
       await GM_setValue(HIDE_PREMIUM_KEY, hidePremiumAd);
       applyPremiumAdVisibility();
+    });
+    panelEl.querySelector('#xc-nav-hide').addEventListener('click', (e) => e.stopPropagation());
+    NAV_ITEMS.forEach((label) => {
+      const slug = navSlug(label);
+      const cb = panelEl.querySelector(`#xc-nav-${slug}`);
+      cb.checked = !!hiddenNavItems[label];
+      cb.addEventListener('change', async (e) => {
+        hiddenNavItems[label] = e.target.checked;
+        await GM_setValue(HIDE_NAV_KEY, hiddenNavItems);
+        applyNavVisibility();
+      });
     });
     refreshPanel();
   }
