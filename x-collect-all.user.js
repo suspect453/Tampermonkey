@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         X - Collect Bookmarks, Likes, Following & Followers
 // @namespace    https://ualan.dev/tampermonkey
-// @version      1.5.0
-// @description  Passively captures bookmarks, likes, following and followers (engagement stats, profile fields, and a raw GraphQL dump per item) as you scroll the matching X pages. One local store, one panel, export/import, and manual sync to a cf-x-archive Worker.
+// @version      1.6.0
+// @description  Passively captures bookmarks, likes, following and followers (engagement stats, profile fields, and a raw GraphQL dump per item) as you scroll the matching X pages. One local store, one panel, export/import, manual sync to a cf-x-archive Worker, and an option to hide the sidebar "Subscribe to Premium" promo.
 // @author       ualan
 // @match        https://x.com/*
 // @match        https://twitter.com/*
@@ -407,6 +407,65 @@
     window.open(`https://${host}${location.pathname}`, '_blank', 'noopener');
   }
 
+  // ---- hide the "Subscribe to Premium" upsell card (right sidebar) ----
+  // X gives it no stable testid, so match it by its own text, then walk up
+  // from the matching text node to the nearest ancestor that looks like the
+  // card's outer wrapper (rounded corners, sidebar-column width).
+
+  const HIDE_PREMIUM_KEY = 'xHidePremiumAd';
+  const hiddenPremiumEls = new Set();
+  let hidePremiumAd = true;
+
+  function looksLikeCardRoot(el) {
+    const style = getComputedStyle(el);
+    return parseFloat(style.borderRadius) > 0 && el.getBoundingClientRect().width > 200;
+  }
+
+  function findPremiumAdCard(textEl) {
+    let node = textEl;
+    for (let i = 0; i < 8 && node && node !== document.body; i++) {
+      if (looksLikeCardRoot(node)) return node;
+      node = node.parentElement;
+    }
+    return textEl.closest('[data-testid="sidebarColumn"] > div > div > div') ?? null;
+  }
+
+  function applyPremiumAdVisibility() {
+    hiddenPremiumEls.forEach((el) => { el.style.display = hidePremiumAd ? 'none' : ''; });
+  }
+
+  function scanForPremiumAd() {
+    const sidebar = document.querySelector('[data-testid="sidebarColumn"]');
+    if (!sidebar) return;
+    const walker = document.createTreeWalker(sidebar, NodeFilter.SHOW_ELEMENT, {
+      acceptNode: (el) => (/subscribe to premium/i.test(el.textContent || '') ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP),
+    });
+    let node;
+    let found = false;
+    while ((node = walker.nextNode())) {
+      const card = findPremiumAdCard(node);
+      if (card && !hiddenPremiumEls.has(card)) { hiddenPremiumEls.add(card); found = true; }
+    }
+    if (found) applyPremiumAdVisibility();
+  }
+
+  let premiumScanTimer = null;
+  function startPremiumAdWatcher() {
+    if (!document.body) { setTimeout(startPremiumAdWatcher, 100); return; }
+    new MutationObserver(() => {
+      clearTimeout(premiumScanTimer);
+      premiumScanTimer = setTimeout(scanForPremiumAd, 300);
+    }).observe(document.body, { childList: true, subtree: true });
+    scanForPremiumAd();
+  }
+
+  GM_getValue(HIDE_PREMIUM_KEY, true).then((v) => {
+    hidePremiumAd = v;
+    if (panelEl) panelEl.querySelector('#xc-hide-premium-cb').checked = hidePremiumAd;
+    applyPremiumAdVisibility();
+  });
+  startPremiumAdWatcher();
+
   // ---- floating panel ----
 
   GM_addStyle(`
@@ -478,6 +537,10 @@
           Followers → <code>x.com/&lt;you&gt;/followers</code>
         </div>
         <div id="xc-status"></div>
+        <label id="xc-hide-premium" style="display:flex;align-items:center;gap:6px;margin-bottom:6px;cursor:pointer;">
+          <input type="checkbox" id="xc-hide-premium-cb" checked>
+          Hide "Subscribe to Premium" promo
+        </label>
         <button id="xc-xcancel">Open on xcancel</button>
         <button id="xc-nitter">Open on nitter</button>
         <button id="xc-sync">Sync to cloud</button>
@@ -499,6 +562,13 @@
     panelEl.querySelector('#xc-csv').addEventListener('click', (e) => { e.stopPropagation(); exportCSV(); });
     panelEl.querySelector('#xc-import').addEventListener('click', (e) => { e.stopPropagation(); importJSON(); });
     panelEl.querySelector('#xc-clear').addEventListener('click', (e) => { e.stopPropagation(); clearAll(); });
+    panelEl.querySelector('#xc-hide-premium').addEventListener('click', (e) => e.stopPropagation());
+    panelEl.querySelector('#xc-hide-premium-cb').checked = hidePremiumAd;
+    panelEl.querySelector('#xc-hide-premium-cb').addEventListener('change', async (e) => {
+      hidePremiumAd = e.target.checked;
+      await GM_setValue(HIDE_PREMIUM_KEY, hidePremiumAd);
+      applyPremiumAdVisibility();
+    });
     refreshPanel();
   }
 
