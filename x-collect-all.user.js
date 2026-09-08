@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         X - Collect Bookmarks, Likes, Following & Followers
 // @namespace    https://ualan.dev/tampermonkey
-// @version      1.4.1
+// @version      1.5.0
 // @description  Passively captures bookmarks, likes, following and followers (engagement stats, profile fields, and a raw GraphQL dump per item) as you scroll the matching X pages. One local store, one panel, export/import, and manual sync to a cf-x-archive Worker.
 // @author       ualan
 // @match        https://x.com/*
@@ -401,6 +401,12 @@
     alert('Service token cleared. Next sync will ask again.');
   }
 
+  // ---- open current tweet/profile on a mirror ----
+
+  function openOnMirror(host) {
+    window.open(`https://${host}${location.pathname}`, '_blank', 'noopener');
+  }
+
   // ---- floating panel ----
 
   GM_addStyle(`
@@ -472,6 +478,8 @@
           Followers → <code>x.com/&lt;you&gt;/followers</code>
         </div>
         <div id="xc-status"></div>
+        <button id="xc-xcancel">Open on xcancel</button>
+        <button id="xc-nitter">Open on nitter</button>
         <button id="xc-sync">Sync to cloud</button>
         <button id="xc-json">Export JSON</button>
         <button id="xc-csv">Export CSV</button>
@@ -484,6 +492,8 @@
       panelEl.classList.toggle('collapsed');
       panelEl.querySelector('#xc-toggle').textContent = panelEl.classList.contains('collapsed') ? '▸' : '▾';
     });
+    panelEl.querySelector('#xc-xcancel').addEventListener('click', (e) => { e.stopPropagation(); openOnMirror('xcancel.com'); });
+    panelEl.querySelector('#xc-nitter').addEventListener('click', (e) => { e.stopPropagation(); openOnMirror('nitter.net'); });
     panelEl.querySelector('#xc-sync').addEventListener('click', (e) => { e.stopPropagation(); syncToCloud(); });
     panelEl.querySelector('#xc-json').addEventListener('click', (e) => { e.stopPropagation(); exportJSON(); });
     panelEl.querySelector('#xc-csv').addEventListener('click', (e) => { e.stopPropagation(); exportCSV(); });
@@ -492,6 +502,8 @@
     refreshPanel();
   }
 
+  GM_registerMenuCommand('Open current page on xcancel', () => openOnMirror('xcancel.com'));
+  GM_registerMenuCommand('Open current page on nitter', () => openOnMirror('nitter.net'));
   GM_registerMenuCommand('Sync X data to cloud', syncToCloud);
   GM_registerMenuCommand('Export X data (JSON)', exportJSON);
   GM_registerMenuCommand('Export X data (CSV)', exportCSV);
