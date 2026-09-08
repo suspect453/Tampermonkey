@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         X - Collect Bookmarks, Likes, Following & Followers
 // @namespace    https://ualan.dev/tampermonkey
-// @version      1.6.0
+// @version      1.6.1
 // @description  Passively captures bookmarks, likes, following and followers (engagement stats, profile fields, and a raw GraphQL dump per item) as you scroll the matching X pages. One local store, one panel, export/import, manual sync to a cf-x-archive Worker, and an option to hide the sidebar "Subscribe to Premium" promo.
 // @author       ualan
 // @match        https://x.com/*
