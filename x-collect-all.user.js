@@ -459,11 +459,13 @@
     scanForPremiumAd();
   }
 
-  GM_getValue(HIDE_PREMIUM_KEY, true).then((v) => {
-    hidePremiumAd = v;
-    if (panelEl) panelEl.querySelector('#xc-hide-premium-cb').checked = hidePremiumAd;
-    applyPremiumAdVisibility();
-  });
+  (async () => {
+    try {
+      hidePremiumAd = await GM_getValue(HIDE_PREMIUM_KEY, true);
+      if (panelEl) panelEl.querySelector('#xc-hide-premium-cb').checked = hidePremiumAd;
+      applyPremiumAdVisibility();
+    } catch (e) { console.warn('[x-collect] premium-ad setting load failed', e); }
+  })();
   startPremiumAdWatcher();
 
   // ---- floating panel ----
