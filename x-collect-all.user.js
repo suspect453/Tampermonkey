@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         X - Collect Bookmarks, Likes, Following & Followers
 // @namespace    https://github.com/suspect453/Tampermonkey
-// @version      1.7.0
+// @version      1.8.0
 // @description  Passively captures bookmarks, likes, following and followers (engagement stats, profile fields, and a raw GraphQL dump per item) as you scroll the matching X pages. One local store, one panel, export/import, manual sync to a cf-x-archive Worker, an option to hide the sidebar "Subscribe to Premium" promo, and per-item toggles to hide left primary-nav entries (Explore, Notifications, Chat, Grok, History, Creator Studio, Premium, Profile, More).
 // @author       suspect453
 // @match        https://x.com/*
@@ -533,9 +533,16 @@
     #xc-panel button.danger { background: #f4212e; }
     #xc-panel button.danger:hover { background: #d61b27; }
     #xc-panel.collapsed #xc-body { display: none; }
+    #xc-header .xc-mini { display: none; }
+    #xc-panel.collapsed { width: auto; border-radius: 12px; opacity: .7; }
+    #xc-panel.collapsed:hover { opacity: 1; }
+    #xc-panel.collapsed #xc-header { padding: 3px 8px; gap: 4px; }
+    #xc-panel.collapsed #xc-header .xc-full { display: none; }
+    #xc-panel.collapsed #xc-header .xc-mini { display: inline; font-size: 11px; }
     ${NAV_ITEMS.map((label) => `html.xc-hide-${navSlug(label)} [data-xc-nav="${navSlug(label)}"] { display:none !important; }`).join('\n    ')}
   `);
 
+  const PANEL_COLLAPSED_KEY = 'xPanelCollapsed';
   let panelEl = null;
   let statusTimer = null;
   function flashStatus(msg) {
@@ -561,10 +568,12 @@
     if (document.getElementById('xc-panel')) return;
     panelEl = document.createElement('div');
     panelEl.id = 'xc-panel';
+    panelEl.className = 'collapsed'; // collapsed until the saved state loads (default: collapsed)
     panelEl.innerHTML = `
       <div id="xc-header">
-        <b>X Data Collector</b>
-        <span id="xc-toggle">▾</span>
+        <b class="xc-full">X Data Collector</b>
+        <b class="xc-mini" title="X Data Collector">XC</b>
+        <span id="xc-toggle">▸</span>
       </div>
       <div id="xc-body">
         <div id="xc-counts">
@@ -603,9 +612,18 @@
       </div>
     `;
     document.body.appendChild(panelEl);
+    const setCollapsed = (collapsed) => {
+      panelEl.classList.toggle('collapsed', collapsed);
+      panelEl.querySelector('#xc-toggle').textContent = collapsed ? '▸' : '▾';
+    };
+    (async () => {
+      try { setCollapsed(!!(await GM_getValue(PANEL_COLLAPSED_KEY, true))); }
+      catch (e) { console.warn('[x-collect] panel state load failed', e); }
+    })();
     panelEl.querySelector('#xc-header').addEventListener('click', () => {
-      panelEl.classList.toggle('collapsed');
-      panelEl.querySelector('#xc-toggle').textContent = panelEl.classList.contains('collapsed') ? '▸' : '▾';
+      const collapsed = !panelEl.classList.contains('collapsed');
+      setCollapsed(collapsed);
+      GM_setValue(PANEL_COLLAPSED_KEY, collapsed);
     });
     panelEl.querySelector('#xc-xcancel').addEventListener('click', (e) => { e.stopPropagation(); openOnMirror('xcancel.com'); });
     panelEl.querySelector('#xc-nitter').addEventListener('click', (e) => { e.stopPropagation(); openOnMirror('nitter.net'); });
